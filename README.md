@@ -1,5 +1,5 @@
 
-# yt-dlp-server
+# yexi
 
 A lean, purpose-built HTTP server for YouTube video metadata and downloads.  
 Built on `youtube-dl-exec` (yt-dlp binary), Express, and Server-Sent Events.
