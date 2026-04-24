@@ -1,0 +1,15 @@
+{
+  "name": "yt-dlp-server",
+  "version": "1.0.0",
+  "description": "YouTube download server powered by yt-dlp-exec",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "youtube-dl-exec": "^3.0.12",
+    "express": "^4.18.2"
+  }
+}
