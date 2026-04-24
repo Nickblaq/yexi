@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "youtube-dl-exec": "^3.0.12",
+    "xlsx": "^0.18.5",
+    "youtubei.js": "17.0.1"
     "express": "^4.18.2"
   }
 }
