@@ -1,3 +1,3 @@
 
 [phases.setup]
-nixPkgs = ['...', 'ffmpeg', 'yt-dlp']
+nixPkgs = ['python3', 'ffmpeg', 'yt-dlp']
