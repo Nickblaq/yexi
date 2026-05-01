@@ -1,1 +1,1 @@
-web: python yt_bot.py
+web: gunicorn app:app
