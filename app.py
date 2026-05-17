@@ -1,90 +1,88 @@
 import os
-import yt_dlp
-from flask import Flask, request, jsonify
-import logging
+import asyncio
+import threading
+from flask import Flask, request, jsonify, render_template_string, send_from_path
+from torrentp import TorrentDownloader
 
-# Disable yt-dlp's default logger to avoid clutter
-logging.getLogger('yt-dlp').disabled = True
-
-# 1. Setup Flask App
 app = Flask(__name__)
 
-# 2. Get your bot token from Railway's environment variables
-BOT_TOKEN = "8705048790:AAFH67hJcn1uLNc2OxL4TIk1xD46zVDny0A"
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable not set on Railway!")
+# Directory where torrents will save inside the container
+DOWNLOAD_DIR = os.path.join(os.getcwd(), "downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 3. Define the route Telegram will call
-@app.route(f'/webhook/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    """Receives updates from Telegram."""
+# Tracks download instances globally
+active_downloads = {}
+
+# Simple embedded UI layout
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cloud Torrent Downloader</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        input[type="text"] { width: 80%; padding: 10px; margin-bottom: 10px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        .file-list { margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h2>Cloud Torrent Downloader</h2>
+    <form action="/download" method="POST">
+        <input type="text" name="torrent_url" placeholder="Paste Magnet Link or Torrent URL here" required>
+        <button type="submit">Start Download</button>
+    </form>
+
+    <div class="file-list">
+        <h3>Completed Downloads</h3>
+        <ul>
+            {% for file in files %}
+                <li><a href="/files/{{ file }}" download>{{ file }}</a></li>
+            {% else %}
+                <li>No files downloaded yet.</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
+"""
+
+def run_torrent_async(magnet_or_url):
+    """Worker function to run the async torrent loop in a background thread."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        update_dict = request.get_json()
-        if not update_dict or 'message' not in update_dict:
-            return jsonify({"status": "ok"}), 200
-
-        message = update_dict['message']
-        chat_id = message['chat']['id']
-        text = message.get('text', '')
-
-        # Handle the /start command
-        if text == '/start':
-            send_message(chat_id, "👋 Hello! Send me a YouTube link and I will download it for you.")
-        # Handle YouTube links
-        elif 'youtube.com' in text or 'youtu.be' in text:
-            send_message(chat_id, "📥 Downloading, please wait...")
-            download_and_send_video(chat_id, text)
-        else:
-            send_message(chat_id, "❌ Please send a valid YouTube link.")
-
-        return jsonify({"status": "ok"}), 200
+        downloader = TorrentDownloader(magnet_or_url, DOWNLOAD_DIR)
+        active_downloads[magnet_or_url] = downloader
+        # Start the asynchronous download process natively supported by torrentp
+        loop.run_until_complete(downloader.start_download())
     except Exception as e:
-        print(f"Error in webhook: {e}")
-        return jsonify({"status": "error"}), 500
+        print(f"Error downloading torrent: {e}")
 
-def send_message(chat_id, text):
-    """Helper function to send a text message back to the user."""
-    import requests
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send message: {e}")
-
-def download_and_send_video(chat_id, url):
-    """Downloads the video and uploads it to the user."""
-    import requests
-    unique_filename = f"{chat_id}_video.mp4"
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'outtmpl': unique_filename,
-        'quiet': True,
-        'no_warnings': True,
-    }
-    try:
-        # 1. Download the video using yt-dlp
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        
-        # 2. Send the video file to the user
-        with open(unique_filename, 'rb') as f:
-            files = {'video': f}
-            data = {'chat_id': chat_id}
-            send_video_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
-            requests.post(send_video_url, data=data, files=files, timeout=60)
-    except Exception as e:
-        send_message(chat_id, f"❌ An error occurred: {e}")
-    finally:
-        # 3. Clean up the file from the server
-        if os.path.exists(unique_filename):
-            os.remove(unique_filename)
-
-# 4. A simple homepage to check if the server is running
 @app.route('/')
 def home():
-    return "Telegram Bot for YouTube Downloads is running!"
+    # List files available in the container storage
+    files = os.listdir(DOWNLOAD_DIR)
+    return render_template_string(HTML_TEMPLATE, files=files)
 
-# This is for local testing. On Railway, 'gunicorn app:app' handles it.
+@app.route('/download', methods=['POST'])
+def start_download():
+    torrent_url = request.form.get('torrent_url')
+    if not torrent_url:
+        return jsonify({"error": "No link provided"}), 400
+
+    # Offload the blocking/async download activity to a background thread
+    thread = threading.Thread(target=run_torrent_async, args=(torrent_url,))
+    thread.start()
+
+    return jsonify({"status": "Download started in background. Refresh the home page shortly."}), 200
+
+@app.route('/files/<path:filename>')
+def download_file(filename):
+    # Route to securely pull completed files back to your computer
+    return send_from_path(DOWNLOAD_DIR, filename, as_attachment=True)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Railway passes a dynamic $PORT environment variable. Your app MUST bind to it.
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
