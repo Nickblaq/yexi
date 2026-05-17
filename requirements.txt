@@ -1,4 +1,3 @@
 fastapi
-uvicorn
-torrentp
-python-multipart
+uvicorn[standard]
+libtorrent==2.0.11
