@@ -5,6 +5,5 @@
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3,
     "healthcheckPath": "/health",
-    "requiredMountPath": "/data"
   }
 }
